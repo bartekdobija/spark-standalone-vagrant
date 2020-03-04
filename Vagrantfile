@@ -1,7 +1,7 @@
 # Spark dependencies
 $spark_deps = <<SCRIPT
 
-  SPARK_VER=spark-2.4.4
+  SPARK_VER=spark-2.4.5
   SPARK_LINK=/opt/spark
 
   if [ ! -e ${SPARK_LINK} ]; then
