@@ -24,7 +24,7 @@ $spark_deps = <<SCRIPT
 
   echo "Spark configuration..."
   echo "configuring /etc/profile.d/spark.sh"
-  echo 'export PATH=$PATH'":${SPARK_LINK}/bin" > /etc/profile.d/spark.sh
+  echo 'export PATH=$PATH'":${SPARK_LINK}/bin:${SPARK_LINK}/sbin" > /etc/profile.d/spark.sh
 
   echo "configuring /opt/spark/conf/spark-env.sh"
   cat << SPCNF > /opt/spark/conf/spark-env.sh
