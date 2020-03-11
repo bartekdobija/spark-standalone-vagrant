@@ -1,3 +1,56 @@
+#Hadoop dependencies
+$hadoop_deps = <<SCRIPT
+
+HADOOP_VER=hadoop-2.10.0
+HADOOP_LINK=/opt/hadoop
+
+if [ ! -e ${HADOOP_LINK} ]; then
+    adduser hadoop
+    echo "Installing Apache Hadoop"
+    wget https://downloads.apache.org/hadoop/common/${HADOOP_VER}/${HADOOP_VER}.tar.gz -q -P /tmp/ \
+      && tar zxf /tmp/${HADOOP_VER}.tar.gz -C /opt/ \
+      && ln -s /opt/${HADOOP_VER} ${HADOOP_LINK} \
+      && chown hadoop:hadoop /opt/${HADOOP_VER} \
+      && echo "export HADOOP_HOME=${HADOOP_LINK}" > /etc/profile.d/hadoop.sh
+fi
+
+SCRIPT
+
+# MySQL dependencies
+$mysql_deps = <<SCRIPT
+
+  MYSQL_REPO=https://dev.mysql.com/get/mysql-community-release-el7-5.noarch.rpm
+  MY_CNF=/etc/my.cnf
+  DEV_PASSWORD=hadoop
+
+  [ ! -e /etc/yum.repos.d/mysql-community.repo ] && rpm -ivh ${MYSQL_REPO}
+
+  yum install --nogpgcheck -y mysql-community-server
+
+  if [ -e /etc/systemd/system/mysql.service ] && [ -z "$(grep -R vagrant ${MY_CNF})" ]; then
+    echo "# InnoDB settings" >> ${MY_CNF}
+    echo "default_storage_engine = innodb" >> ${MY_CNF}
+    echo "innodb_file_per_table = 1" >> ${MY_CNF}
+    echo "innodb_flush_log_at_trx_commit = 2" >> ${MY_CNF}
+    echo "innodb_log_buffer_size = 64M" >> ${MY_CNF}
+    echo "innodb_buffer_pool_size = 1G" >> ${MY_CNF}
+    echo "innodb_thread_concurrency = 8" >> ${MY_CNF}
+    echo "innodb_flush_method = O_DIRECT" >> ${MY_CNF}
+    echo "innodb_log_file_size = 512M" >> ${MY_CNF}
+    echo "explicit_defaults_for_timestamp = 1" >> ${MY_CNF}
+    systemctl enable mysqld.service \
+      && systemctl start mysqld.service \
+      && /usr/bin/mysqladmin -u root password "${DEV_PASSWORD}" &> /dev/null \
+      && echo "# vagrant provisioned" >> ${MY_CNF}
+
+    mysql -u root -p${DEV_PASSWORD} \
+      -e "create schema if not exists hive; grant all on hive.* to 'hive'@'localhost' identified by 'hive'"
+  fi
+
+SCRIPT
+
+
+
 # Spark dependencies
 $spark_deps = <<SCRIPT
 
@@ -80,7 +133,8 @@ $hive_deps = <<SCRIPT
     wget http://mirrors.whoishostingthis.com/apache/hive/hive-${HIVE_VER}/apache-hive-${HIVE_VER}-bin.tar.gz -q -P /tmp/ \
       && tar zxf /tmp/apache-hive-${HIVE_VER}-bin.tar.gz -C /opt/ \
       && ln -s /opt/apache-hive-${HIVE_VER}-bin ${HIVE_LINK} \
-      && chown hive:hive /opt/apache-hive-${HIVE_VER}-bin
+      && chown hive:hive /opt/apache-hive-${HIVE_VER}-bin \
+      && wget https://repo1.maven.org/maven2/mysql/mysql-connector-java/5.1.48/mysql-connector-java-5.1.48.jar -q -P ${HIVE_LINK}/lib/
   fi
 
   echo "configuring ${HIVE_LINK}/conf/hive-site.xml"
@@ -109,48 +163,36 @@ $hive_deps = <<SCRIPT
 </property>
 <property>
   <name>hive.metastore.warehouse.dir</name>
-  <value>file:///user/hive/warehouse</value>
+  <value>/home/hive/warehouse</value>
 </property>
 </configuration>
 
 HIVECNF
 
+  cat << HIVEENV > ${HIVE_LINK}/conf/hive-env.sh
+
+HADOOP_HOME=/opt/hadoop
+
+HIVEENV
+
+  echo "configuring /etc/profile.d/hive.sh"
+
+  cat << PROFD > /etc/profile.d/hive.sh
+
+export PATH=\\${PATH}:${HIVE_LINK}/bin
+
+PROFD
+
+
+if [ ! -e ${HIVE_LINK}/vagrant.provisioned ]; then 
+  
+  echo "creating metastore database structure"
+  ${HIVE_LINK}/bin/schematool -dbType mysql -initSchema \
+    && echo "provisioned" > ${HIVE_LINK}/vagrant.provisioned
+fi
 
 SCRIPT
 
-
-# MySQL dependencies
-$mysql_deps = <<SCRIPT
-
-  MYSQL_REPO=https://dev.mysql.com/get/mysql-community-release-el7-5.noarch.rpm
-  MY_CNF=/etc/my.cnf
-  DEV_PASSWORD=hadoop
-
-  [ ! -e /etc/yum.repos.d/mysql-community.repo ] && rpm -ivh ${MYSQL_REPO}
-
-  yum install --nogpgcheck -y mysql-community-server
-
-  if [ -e /etc/systemd/system/mysql.service ] && [ -z "$(grep -R vagrant ${MY_CNF})" ]; then
-    echo "# InnoDB settings" >> ${MY_CNF}
-    echo "default_storage_engine = innodb" >> ${MY_CNF}
-    echo "innodb_file_per_table = 1" >> ${MY_CNF}
-    echo "innodb_flush_log_at_trx_commit = 2" >> ${MY_CNF}
-    echo "innodb_log_buffer_size = 64M" >> ${MY_CNF}
-    echo "innodb_buffer_pool_size = 1G" >> ${MY_CNF}
-    echo "innodb_thread_concurrency = 8" >> ${MY_CNF}
-    echo "innodb_flush_method = O_DIRECT" >> ${MY_CNF}
-    echo "innodb_log_file_size = 512M" >> ${MY_CNF}
-    echo "explicit_defaults_for_timestamp = 1" >> ${MY_CNF}
-    systemctl enable mysqld.service \
-      && systemctl start mysqld.service \
-      && /usr/bin/mysqladmin -u root password "${DEV_PASSWORD}" &> /dev/null \
-      && echo "# vagrant provisioned" >> ${MY_CNF}
-
-    mysql -u root -p${DEV_PASSWORD} \
-      -e "create schema if not exists hive; grant all on hive.* to 'hive'@'localhost' identified by 'hive'"
-  fi
-
-SCRIPT
 
 # OS configuration
 $system_config = <<SCRIPT
@@ -210,7 +252,7 @@ SCRIPT
 $yum_config = <<SCRIPT
   rpm -i https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm 2> /dev/null
   yum update
-  yum -y install wget curl openssl java-1.8.0-openjdk
+  yum -y install wget curl openssl java-1.8.0-openjdk && echo "export JAVA_HOME=/usr/lib/jvm/jre" > /etc/profile.d/java.sh
 SCRIPT
 
 $information = <<SCRIPT
@@ -218,8 +260,10 @@ $information = <<SCRIPT
   echo "Guest IP address: $ip"
   echo "Namenode UI available at: http://$ip:9870"
   echo "Resource Manager UI available at: http://$ip:8088"
-  echo "Spark historyserver available at: http://$ip:18080"
+  echo "Spark HistoryServer available at: http://$ip:18080"
   echo "Spark available under /opt/spark"
+  echo "Start HiveServer2 with: hive -service hiveserver2"
+  echo "Start Hive Metastore with: hive -service metastore"
   echo "MySQL root password: hadoop"
   echo "You may want to add the below line to /etc/hosts:"
   echo "$ip spark.instance.com"
@@ -242,6 +286,7 @@ Vagrant.configure(2) do |config|
   config.vm.provision :shell, :name => "system_config", :inline => $system_config
   config.vm.provision :shell, :name => "yum_config", :inline => $yum_config
   config.vm.provision :shell, :name => "mysql_deps", :inline => $mysql_deps
+  config.vm.provision :shell, :name => "hadoop_deps", :inline => $hadoop_deps
   config.vm.provision :shell, :name => "spark_deps", :inline => $spark_deps
   config.vm.provision :shell, :name => "hive_deps", :inline => $hive_deps
   config.vm.provision :shell, :name => "information", :inline => $information
