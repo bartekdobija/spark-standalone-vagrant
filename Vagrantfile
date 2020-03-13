@@ -70,7 +70,11 @@ $spark_deps = <<SCRIPT
       && chown -R spark:spark /opt/${SPARK_VER}-bin-hadoop2.7 \
       && mkdir -p /var/log/spark/apps \
       && chown -R spark:spark /var/log/spark \
-      && chmod -R 777 /var/log/spark/apps
+      && chmod -R 777 /var/log/spark/apps \
+      && ln -s -f /opt/hive/conf/hive-site.xml /opt/spark/conf/hive-site.xml \
+      && ln -s -f /opt/hadoop/etc/hadoop/core-site.xml /opt/spark/conf/core-site.xml \
+      && ln -s -f /opt/hadoop/etc/hadoop/hdfs-site.xml /opt/spark/conf/hdfs-site.xml \
+      && usermod -a -G hive spark
   fi
 
   [ ! -e ${SPARK_LINK} ] && echo "Spark installation has failed!" && exit 1
@@ -114,8 +118,7 @@ spark.checkpoint.compress true
 spark.io.compression.codec lz4
 spark.executor.extraJavaOptions -verbose:gc -XX:+PrintGCDetails -XX:+PrintGCTimeStamps -XX:+UseCompressedOops
 spark.driver.extraJavaOptions -XX:+UseCompressedOops -XX:MaxPermSize=1g
-spark.executor.extraClassPath /usr/local/lib/jdbc/mysql/*.jar
-spark.driver.extraClassPath /usr/local/lib/jdbc/mysql/*.jar
+spark.hadoop.fs.permissions.umask-mode 022
 SPCNF
 
 
@@ -134,7 +137,9 @@ $hive_deps = <<SCRIPT
       && tar zxf /tmp/apache-hive-${HIVE_VER}-bin.tar.gz -C /opt/ \
       && ln -s /opt/apache-hive-${HIVE_VER}-bin ${HIVE_LINK} \
       && chown hive:hive /opt/apache-hive-${HIVE_VER}-bin \
-      && wget https://repo1.maven.org/maven2/mysql/mysql-connector-java/5.1.48/mysql-connector-java-5.1.48.jar -q -P ${HIVE_LINK}/lib/
+      && wget https://repo1.maven.org/maven2/mysql/mysql-connector-java/5.1.48/mysql-connector-java-5.1.48.jar -q -P ${HIVE_LINK}/lib/ \
+      && mkdir -p /tmp/hive && chmod -R 777 /tmp/hive \
+      && mkdir -p /hive-warehouse && chown hive:hive /hive-warehouse && chmod 770 /hive-warehouse
   fi
 
   echo "configuring ${HIVE_LINK}/conf/hive-site.xml"
@@ -163,7 +168,17 @@ $hive_deps = <<SCRIPT
 </property>
 <property>
   <name>hive.metastore.warehouse.dir</name>
-  <value>/home/hive/warehouse</value>
+  <value>/hive-warehouse</value>
+</property>
+<property>
+  <name>hive.warehouse.subdir.inherit.perms</name>
+  <value>true</value>
+  <description></description>
+</property>
+<property>
+  <name>hive.metastore.execute.setugi</name>
+  <value>true</value>
+  <description></description>
 </property>
 </configuration>
 
@@ -287,8 +302,8 @@ Vagrant.configure(2) do |config|
   config.vm.provision :shell, :name => "yum_config", :inline => $yum_config
   config.vm.provision :shell, :name => "mysql_deps", :inline => $mysql_deps
   config.vm.provision :shell, :name => "hadoop_deps", :inline => $hadoop_deps
-  config.vm.provision :shell, :name => "spark_deps", :inline => $spark_deps
   config.vm.provision :shell, :name => "hive_deps", :inline => $hive_deps
+  config.vm.provision :shell, :name => "spark_deps", :inline => $spark_deps
   config.vm.provision :shell, :name => "information", :inline => $information
 
 end
